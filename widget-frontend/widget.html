@@ -3,10 +3,6 @@
   Widget page - Architecture v5, Feature A ("Cupola-Native Inline Value Overlay")
 
   Usage: widget.html?id=iron_ore
-
-  Deliberately minimal: no card, no border, no background box. Just a single
-  line of text ("iron_ore: 52 gm") so it visually blends with Cupola's own
-  floating icon labels when this page is embedded in a hotspot.
 -->
 <html lang="en">
 
@@ -19,14 +15,15 @@
       margin: 0;
       padding: 0;
       background: transparent;
+      overflow: hidden;
       font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+    }
+    ::-webkit-scrollbar {
+      display: none;
     }
 
     #label {
-      display: inline-block !important;
-      color: #ea580c !important;
-      font-size: 32px !important;
-      font-weight: 700 !important;
+      display: inline-block;
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
       white-space: nowrap;
       padding: 2px 6px;
@@ -34,8 +31,6 @@
 
     #alarm {
       min-height: 24px;
-      color: #ff3b30;
-      font-size: 24px;
       font-weight: 700;
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
       padding: 0 6px 2px;
@@ -44,13 +39,25 @@
 </head>
 
 <body>
-  <div id="label" style="color: #ea580c; font-size: 32px; font-weight: 700;">--</div>
+  <div id="label">--</div>
   <div id="alarm" role="status" aria-live="polite"></div>
 
   <script src="js/ws-client.js"></script>
   <script>
-    // Use the host serving this widget, so another device does not resolve
-    // localhost to itself instead of the laptop running the backend.
+    /* =========================================================================
+     * 🎛️ DEFAULT CONFIGURATION — CHANGE STYLING HERE IN ONE SINGLE LOCATION:
+     * ========================================================================= */
+    const DEFAULT_CONFIG = {
+      color: "#ea580c",     // Text color (e.g. "#ea580c", "#ffffff", "#000000")
+      size: "32px",         // Text font size (e.g. "32px", "24px", "20px")
+      fontWeight: "700",    // Text weight ("600", "700", "bold")
+      alarmColor: "#ff3b30",// Alarm text color
+      alarmSize: "24px",    // Alarm font size
+      decimals: 2,          // Default decimal places for numbers (e.g. 7.82 g)
+    };
+    /* ========================================================================= */
+
+    // Use the host serving this widget, so remote devices reach the backend.
     const backendProtocol = window.location.protocol === "https:" ? "https:" : "http:";
     const websocketProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const API_BASE = `${backendProtocol}//${window.location.hostname}:4000`;
@@ -60,23 +67,44 @@
     const itemId = params.get("id");
     const customColor = params.get("color");
     const customSize = params.get("size");
+    const decimalsParam = params.get("decimals");
+    const numDecimals = decimalsParam !== null && !isNaN(decimalsParam) ? parseInt(decimalsParam, 10) : DEFAULT_CONFIG.decimals;
+    const valueOnly = params.get("valueOnly") === "true" || params.get("label") === "false";
+    const hideAlarm = params.get("hideAlarm") === "true" || params.get("alarm") === "false";
+
     const labelEl = document.getElementById("label");
     const alarmEl = document.getElementById("alarm");
 
+    // Resolve color & size: URL parameter takes priority, otherwise uses DEFAULT_CONFIG
     const resolvedColor = customColor
       ? (/^[0-9a-fA-F]{3,8}$/.test(customColor) ? `#${customColor}` : customColor)
-      : "#ea580c";
+      : DEFAULT_CONFIG.color;
+
     const resolvedSize = customSize
       ? (isNaN(customSize) ? customSize : `${customSize}px`)
-      : "32px";
+      : (typeof DEFAULT_CONFIG.size === "number" ? `${DEFAULT_CONFIG.size}px` : DEFAULT_CONFIG.size);
 
-    labelEl.style.setProperty("color", resolvedColor, "important");
-    labelEl.style.setProperty("font-size", resolvedSize, "important");
+    // Apply styles to elements
+    labelEl.style.color = resolvedColor;
+    labelEl.style.fontSize = resolvedSize;
+    labelEl.style.fontWeight = DEFAULT_CONFIG.fontWeight;
+
+    alarmEl.style.color = DEFAULT_CONFIG.alarmColor;
+    alarmEl.style.fontSize = DEFAULT_CONFIG.alarmSize;
+    if (hideAlarm) {
+      alarmEl.style.display = "none";
+    }
 
     const HOPPER_MATERIALS = ["gypsum", "clay", "iron_ore", "sand", "limestone", "lime_stone"];
-    const DHT_LABELS = {
-      klin_dht_temp: "Klin Temp",
-      klin_dht_humidity: "Klin Humidity",
+    const DISPLAY_LABELS = {
+      gypsum: "Gypsum",
+      clay: "Clay",
+      iron_ore: "Iron Ore",
+      sand: "Sand",
+      limestone: "Limestone",
+      lime_stone: "Limestone Gate",
+      klin_dht_temp: "Kiln Temp",
+      klin_dht_humidity: "Kiln Humidity",
       cooler_dht_temp: "Cooler Temp",
       cooler_dht_humidity: "Cooler Humidity",
       preheating_tower_dht_temp: "Preheat Temp",
@@ -86,24 +114,27 @@
 
     function render(itemId, value, unit) {
       let shown = value === null || value === undefined ? "--" : value;
-      if (typeof shown === "number" && shown < 0) {
-        shown = 0;
+      if (typeof shown === "number") {
+        if (shown < 0) shown = 0;
+        if (!Number.isInteger(shown)) {
+          shown = shown.toFixed(numDecimals);
+        }
       }
-      const label = DHT_LABELS[itemId] || itemId;
-      labelEl.textContent = `${label}: ${shown}${unit ? " " + unit : ""}`;
-      labelEl.style.setProperty("color", resolvedColor, "important");
-      labelEl.style.setProperty("font-size", resolvedSize, "important");
+      const label = DISPLAY_LABELS[itemId] || itemId;
+      labelEl.textContent = valueOnly
+        ? `${shown}${unit ? " " + unit : ""}`
+        : `${label}: ${shown}${unit ? " " + unit : ""}`;
 
       const weight = Number(value);
       const isHopper = HOPPER_MATERIALS.includes(itemId);
 
-      if (isHopper && value !== null && value !== undefined && value !== "" && Number.isFinite(weight)) {
+      if (!hideAlarm && isHopper && value !== null && value !== undefined && value !== "" && Number.isFinite(weight)) {
         if (weight > 20) {
           alarmEl.textContent = "OVERLOAD ALARM";
-          alarmEl.style.color = "#ff3b30";
+          alarmEl.style.color = DEFAULT_CONFIG.alarmColor;
         } else if (weight < 5) {
           alarmEl.textContent = "UNDER WEIGHT ALARM";
-          alarmEl.style.color = "#ff3b30";
+          alarmEl.style.color = DEFAULT_CONFIG.alarmColor;
         } else {
           alarmEl.textContent = "";
         }

@@ -19,6 +19,16 @@ router.get("/item/:id", (req, res) => {
   res.json({ item_id: req.params.id, ...store.get(req.params.id) });
 });
 
+// Plain text endpoint: returns just "0 m/s²" or "52 g"
+router.get("/item/:id/text", (req, res) => {
+  const item = findItem(req.params.id);
+  if (!item) return res.status(404).send("Unknown item_id");
+  const data = store.get(req.params.id) || {};
+  const val = data.value !== null && data.value !== undefined ? data.value : "--";
+  const unit = data.unit ? ` ${data.unit}` : "";
+  res.type("text/plain").send(`${val}${unit}`);
+});
+
 router.get("/devices", (req, res) => {
   res.json(store.allDevices());
 });

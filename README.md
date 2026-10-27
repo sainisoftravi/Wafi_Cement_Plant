@@ -59,23 +59,22 @@ Use `.\start.ps1 -SkipInstall` after dependencies have already been installed.
 
 ## Run with Docker Compose
 
-Install Docker Desktop, then from the project root run:
+The Docker Compose configuration (`docker-compose.yml`) provides a complete, self-contained environment with built-in CPU and memory resource limits:
 
 ```powershell
 docker compose up --build -d
 ```
 
-Open the dashboard at `http://localhost:5173`, the widget at
-`http://localhost:4173/widget.html?id=iron_ore`, and the backend API at
-`http://localhost:4000/api/items`. To stop the containers, run
-`docker compose down`.
+Services started:
+- **Mosquitto** (`1883:1883`) — Lightweight containerized MQTT broker with LAN access for ESP32 boards.
+- **Backend** (`4000:4000`) — Node.js REST API & WebSocket server, auto-connected to the containerized Mosquitto broker and HiveMQ Cloud bridge. Includes live code reload mounts.
+- **Dashboard** (`5173:80`) — Production Nginx serving the React digital twin dashboard.
+- **Widget Frontend** (`4173:4173`) — Express server serving live hotspot widget and control pages. Includes live code reload mounts.
 
-The backend connects to an MQTT broker outside Docker. By default,
-`MQTT_HOST=host.docker.internal` targets a broker running on the Docker host;
-set `MQTT_HOST` to another reachable hostname or IP if needed. Add broker
-credentials and any HiveMQ/ThingsBoard settings to a root `.env` file (already
-git-ignored); the Compose configuration passes these settings to the backend.
-The ESP32 boards and their firmware remain outside Docker.
+To stop the containers, run `docker compose down`.
+
+> [!NOTE]
+> If Mosquitto was previously installed directly on the host machine via systemd, disable the host service (`sudo systemctl stop mosquitto && sudo systemctl disable mosquitto`) so the Docker Mosquitto service can bind to port `1883`. Host and ESP32 boards can reach the broker at `<host-ip>:1883`.
 
 ## 1. Backend
 
@@ -109,34 +108,69 @@ If your backend isn't on `localhost:4000`, edit `src/config.js` first.
 
 ## 3. Widget pages (for Cupola)
 
-No build step — serve the folder with any static server:
+The widget pages provide minimal, transparent overlays designed to embed seamlessly in 360 viewer hotspots (Cupola) without white borders or backgrounds.
+
+No build step — serve the folder with any static server (or use Docker):
 
 ```bash
 cd widget-frontend
 npx serve .
 ```
 
-Open these directly in a browser tab first, on their own, to confirm they
-work standalone before pasting the URLs into Cupola:
+### New Widget Styling & Customization Features (`widget.html`)
 
-- `http://localhost:PORT/widget.html?id=iron_ore` — live value label
-- `http://localhost:PORT/control.html?id=crusher&action=on` — fires ON
-- `http://localhost:PORT/control.html?id=crusher&action=off` — fires OFF
+1. **Centralized Configuration**:
+   Change styling globally in one single place at the top of `<script>` in `widget-frontend/widget.html`:
+   ```javascript
+   const DEFAULT_CONFIG = {
+     color: "#ea580c",     // Default text color (e.g. Dark Orange)
+     size: "32px",         // Default text font size
+     fontWeight: "700",    // Font weight
+     alarmColor: "#ff3b30",// Alarm color
+     alarmSize: "24px",    // Alarm font size
+     decimals: 2,          // Decimal places (e.g. 7.82 g)
+   };
+   ```
 
-If the widget pages aren't on `localhost:4000` for the backend, edit the
-`API_BASE` / `WS_URL` constants near the top of `widget.html` and
-`control.html`.
+2. **Clean Capitalized Labels & Decimal Rounding**:
+   - Automatically renders titles cleanly: `Iron Ore`, `Sand`, `Gypsum`, `Clay`, `Kiln Temp`, `Vibration Value`.
+   - Automatically rounds floating numbers to clean values (e.g. `7.82 g` instead of `7.817529 g`).
 
-## 4. Configure Cupola
+3. **Dynamic URL Query Parameters** (Customize per-hotspot without editing code):
+   - `&size=<px>` — Scale font size (e.g. `?id=sand&size=24`).
+   - `&color=<hex>` — Custom color (e.g. `?id=sand&color=ffffff` or `&color=000000`).
+   - `&valueOnly=true` — Shows **only** the value and unit, hiding the label name (e.g. `7.82 g`).
+   - `&hideAlarm=true` — Hides the `UNDER WEIGHT ALARM` / `OVERLOAD ALARM` warning.
+   - `&decimals=<n>` — Customize decimal precision (e.g. `&decimals=1` -> `7.8 g`).
+   - *Example:* `widget.html?id=sand&size=26&color=facc15&valueOnly=true`
 
-Paste the widget-frontend URLs into each hotspot's embed field, exactly as
-you would a YouTube or ThingsBoard link today. Full endpoint reference,
-request/response shapes, and both control.html hotspot styles are documented
-in `API_DOCUMENTATION.md`.
+4. **No Iframe Scrollbars**:
+   - `overflow: hidden` and custom scrollbar rules ensure no scrollbars appear inside embedded hotspot iframes.
 
-## Cupola hotspot URLs (current item list)
+---
 
-Material value labels (inline, plain text):
+## 4. Direct REST APIs (No Iframes Required)
+
+If you are building your own custom application or frontend and do not want to use iframes, use these direct HTTP GET APIs:
+
+### Live Values (JSON & Plain Text)
+- `GET http://<host>:4000/api/items` — Returns a complete snapshot of all materials, sensors, and actuators in a single JSON response.
+- `GET http://<host>:4000/api/item/:id` — Returns single item JSON: `{ "item_id": "sand", "value": 7.82, "unit": "g" }`.
+- `GET http://<host>:4000/api/item/:id/text` — Returns raw plain text (e.g. `7.82 g` or `0 m/s²`).
+- `GET http://<host>:4000/api/devices` — Device connection status (ESP1, ESP2 online/offline).
+
+### Actuator Control (Simple GET URLs)
+- Turn ON / OPEN: `GET http://<host>:4000/api/item/:id/action/on` (or `/action/open`)
+- Turn OFF / CLOSE: `GET http://<host>:4000/api/item/:id/action/off` (or `/action/close`)
+- Resume Auto PID: `POST http://<host>:4000/api/item/klin/resume-auto` (or `klin_heater`)
+
+---
+
+## 5. Configure Cupola
+
+Paste the widget-frontend URLs into each hotspot's embed field:
+
+Material value labels:
 ```
 widget.html?id=gypsum
 widget.html?id=clay
@@ -146,7 +180,7 @@ control.html?id=lime_stone&action=open
 control.html?id=lime_stone&action=close
 ```
 
-Sensor value labels (inline, plain text):
+Sensor value labels:
 ```
 widget.html?id=clin_dht_temp
 widget.html?id=clin_dht_humidity
