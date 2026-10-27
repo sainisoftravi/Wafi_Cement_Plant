@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<!--
+  Widget page - Architecture v5, Feature A ("Cupola-Native Inline Value Overlay")
+
+  Usage: widget.html?id=iron_ore
+
+  Deliberately minimal: no card, no border, no background box. Just a single
+  line of text ("iron_ore: 52 gm") so it visually blends with Cupola's own
+  floating icon labels when this page is embedded in a hotspot.
+-->
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Widget</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+    }
+
+    #label {
+      display: inline-block !important;
+      color: #ea580c !important;
+      font-size: 32px !important;
+      font-weight: 700 !important;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+      white-space: nowrap;
+      padding: 2px 6px;
+    }
+
+    #alarm {
+      min-height: 24px;
+      color: #ff3b30;
+      font-size: 24px;
+      font-weight: 700;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+      padding: 0 6px 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="label" style="color: #ea580c; font-size: 32px; font-weight: 700;">--</div>
+  <div id="alarm" role="status" aria-live="polite"></div>
+
+  <script src="js/ws-client.js"></script>
+  <script>
+    // Use the host serving this widget, so another device does not resolve
+    // localhost to itself instead of the laptop running the backend.
+    const backendProtocol = window.location.protocol === "https:" ? "https:" : "http:";
+    const websocketProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const API_BASE = `${backendProtocol}//${window.location.hostname}:4000`;
+    const WS_URL = `${websocketProtocol}//${window.location.hostname}:4000/ws`;
+
+    const params = new URLSearchParams(window.location.search);
+    const itemId = params.get("id");
+    const customColor = params.get("color");
+    const customSize = params.get("size");
+    const labelEl = document.getElementById("label");
+    const alarmEl = document.getElementById("alarm");
+
+    const resolvedColor = customColor
+      ? (/^[0-9a-fA-F]{3,8}$/.test(customColor) ? `#${customColor}` : customColor)
+      : "#ea580c";
+    const resolvedSize = customSize
+      ? (isNaN(customSize) ? customSize : `${customSize}px`)
+      : "32px";
+
+    labelEl.style.setProperty("color", resolvedColor, "important");
+    labelEl.style.setProperty("font-size", resolvedSize, "important");
+
+    const HOPPER_MATERIALS = ["gypsum", "clay", "iron_ore", "sand", "limestone", "lime_stone"];
+    const DHT_LABELS = {
+      klin_dht_temp: "Klin Temp",
+      klin_dht_humidity: "Klin Humidity",
+      cooler_dht_temp: "Cooler Temp",
+      cooler_dht_humidity: "Cooler Humidity",
+      preheating_tower_dht_temp: "Preheat Temp",
+      preheating_tower_dht_humidity: "Preheat Humidity",
+      vibration_sensor: "Vibration Value",
+    };
+
+    function render(itemId, value, unit) {
+      let shown = value === null || value === undefined ? "--" : value;
+      if (typeof shown === "number" && shown < 0) {
+        shown = 0;
+      }
+      const label = DHT_LABELS[itemId] || itemId;
+      labelEl.textContent = `${label}: ${shown}${unit ? " " + unit : ""}`;
+      labelEl.style.setProperty("color", resolvedColor, "important");
+      labelEl.style.setProperty("font-size", resolvedSize, "important");
+
+      const weight = Number(value);
+      const isHopper = HOPPER_MATERIALS.includes(itemId);
+
+      if (isHopper && value !== null && value !== undefined && value !== "" && Number.isFinite(weight)) {
+        if (weight > 20) {
+          alarmEl.textContent = "OVERLOAD ALARM";
+          alarmEl.style.color = "#ff3b30";
+        } else if (weight < 5) {
+          alarmEl.textContent = "UNDER WEIGHT ALARM";
+          alarmEl.style.color = "#ff3b30";
+        } else {
+          alarmEl.textContent = "";
+        }
+      } else {
+        alarmEl.textContent = "";
+      }
+    }
+
+    if (!itemId) {
+      labelEl.textContent = "missing ?id=";
+    } else {
+      // Initial snapshot so the label isn't blank before the first WS message.
+      fetch(`${API_BASE}/api/item/${itemId}`)
+        .then((r) => r.json())
+        .then((data) => render(itemId, data.value, data.unit))
+        .catch(() => { });
+
+      // Live updates, scoped to just this item (Architecture v5, Section 4.2).
+      connectWidgetSocket(WS_URL, itemId, (data) => {
+        render(itemId, data.value, data.unit);
+      });
+    }
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,96 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+    mem_limit: 128m
+    cpus: 0.25
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/server.js:/app/server.js
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      PORT: 4000
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      OTA_UPDATE_PASSWORD: ${OTA_UPDATE_PASSWORD:-Dts@chennai}
+      THINGSBOARD_HOST: ${THINGSBOARD_HOST:-allcad-chennai.selfip.com}
+      THINGSBOARD_MQTT_PORT: ${THINGSBOARD_MQTT_PORT:-1883}
+      THINGSBOARD_URL: ${THINGSBOARD_URL:-http://allcad-chennai.selfip.com:8081}
+      THINGSBOARD_USERNAME: ${THINGSBOARD_USERNAME:-tenant@thingsboard.org}
+      THINGSBOARD_PASSWORD: ${THINGSBOARD_PASSWORD:-tenant}
+      ESP1_DEVICE_ID: ${ESP1_DEVICE_ID:-14b34d90-9fb8-11f1-8d8e-7b62c5bdec2c}
+      ESP2_DEVICE_ID: ${ESP2_DEVICE_ID:-9bc73a80-9fb8-11f1-8d8e-7b62c5bdec2c}
+      ESP1_ACCESS_TOKEN: ${ESP1_ACCESS_TOKEN:-esp1}
+      ESP2_ACCESS_TOKEN: ${ESP2_ACCESS_TOKEN:-esp2}
+      HIVEMQ_HOST: ${HIVEMQ_HOST:-5c0b21424f334243b66237dfd2f9b565.s1.eu.hivemq.cloud}
+      HIVEMQ_PORT: ${HIVEMQ_PORT:-8883}
+      HIVEMQ_USER: ${HIVEMQ_USER:-admin}
+      HIVEMQ_PASSWORD: ${HIVEMQ_PASSWORD:-Admin@321}
+    ports:
+      - "4000:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 512m
+    cpus: 1.0
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  dashboard:
+    build:
+      context: ./dashboard-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    mem_limit: 128m
+    cpus: 0.25
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  widget:
+    build:
+      context: ./widget-frontend
+    restart: unless-stopped
+    volumes:
+      - ./widget-frontend:/app
+      - /app/node_modules
+    environment:
+      PORT: 4173
+    ports:
+      - "4173:4173"
+    depends_on:
+      - backend
+    mem_limit: 256m
+    cpus: 0.5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
